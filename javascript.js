@@ -383,12 +383,6 @@ function AddToZBuffer(object)
 		zbuffer.push(object);
 }
 
-// --- Vector2 ---
-function vec2 (_x, _y)
-{
-	return { x: _x, y: _y };
-}
-
 // --- Keyboard Input (Down) ---
 document.addEventListener('keydown', function (e)
 {
