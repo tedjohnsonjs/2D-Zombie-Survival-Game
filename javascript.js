@@ -4,10 +4,12 @@
 // Constants
 const PLAYER_HEALTH = 5;
 const PLAYER_SPEED = 1;
+const PLAYER_SPEED_DIAG = PLAYER_SPEED * 0.707;
 const PLAYER_SIZE = 10;
+const WALK_SPACE = 50;
 
-const BULLET_SPEED = 10;
-const BULLET_SIZE = 2;
+const BULLET_SPEED = 6;
+const BULLET_SIZE = 5;
 
 const ZOMBIE_HEALTH = 3;
 const ZOMBIE_SPEEDMAX = 0.6;
@@ -18,35 +20,53 @@ const ZOMBIE_SIZE = 10;
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
 var keysDown = [];
-var zbuffer = [];
+var mousePos = { x: 0, y: 0 };
+var mouseDown = false;
 
-// Objects
+// Object lists
 var player;
 var bullets = [];
 var zombies = [];
 var lowParticles = [];
 var highParticles = [];
+var zbuffer = [];
+
+// Items
+var items =
+[
+/*0*/ { name: "Empty" },
+
+//    --- Guns ---
+/*1*/ { name: "Pistol",          dmg: 3, range: { min: 70, max: 80 },   rate: 50, count: 1,  accr: 0.05,  mag: 8,  reload: 100 },
+/*2*/ { name: "Rifle",           dmg: 8, range: { min: 160, max: 200 }, rate: 90, count: 1,  accr: 0.01,  mag: 5,  reload: 200 },
+/*3*/ { name: "Shotgun",         dmg: 1, range: { min: 30, max: 70 },   rate: 80, count: 8,  accr: 0.175, mag: 6,  reload: 200 },
+/*4*/ { name: "Double-Barrel",   dmg: 2, range: { min: 10, max: 50 },   rate: 20, count: 12, accr: 0.5,   mag: 2,  reload: 200 },
+/*5*/ { name: "Sub-Machine Gun", dmg: 1, range: { min: 60, max: 100 },  rate: 10, count: 1,  accr: 0.1,   mag: 30, reload: 150 }
+];
 
 // ==================== CLASSES ====================
 
 // --- Player Class ---
-function Player (_x, _y, _gunID, _helmetID, _armourID)
+function Player (_x, _y, _gunID)
 {
-	this.x = _x;
-	this.y = _y;
+	this.pos = { x: _x, y: _y };
 
 	this.upKey = 87;
 	this.downKey = 83;
 	this.leftKey = 65;
 	this.rightKey = 68;
-	this.shootKey = 87;
 	this.useKey = 69;
 
 	this.health = PLAYER_HEALTH;
 	this.alive = true;
 	this.hasControl = true;
 
-	this.loaded = true;
+	this.gunID = _gunID;
+
+	this.readyToFire = false;
+	this.loaded = items[this.gunID].mag;
+	this.curGunDelay = 0;
+	this.curReloadDelay = items[this.gunID].reload;
 
 	this.Update = function ()
 	{
@@ -56,34 +76,71 @@ function Player (_x, _y, _gunID, _helmetID, _armourID)
 			if (this.health <= 0)
 				this.Death();
 
+			// Checks gun
+			this.readyToFire = true;
+
+			if (this.curGunDelay-- > 0)
+				this.readyToFire = false;
+
+			if (this.loaded <= 0)
+			{
+				this.readyToFire = false;
+				if (this.curReloadDelay-- <= 0)
+				{
+					this.loaded = items[this.gunID].mag;
+					this.curReloadDelay = items[this.gunID].reload;
+				}
+			}
+
 			// Control
 			if (this.hasControl)
 			{
-				if (keysDown[this.upKey]) this.y -= PLAYER_SPEED
-				if (keysDown[this.downKey]) this.y += PLAYER_SPEED;
-				if (keysDown[this.leftKey]) this.x -= PLAYER_SPEED;
-				if (keysDown[this.rightKey]) this.x += PLAYER_SPEED;
 
-				if (keysDown[this.shootKey] && this.loaded == 0)
+				// Moving
+				if (keysDown[this.upKey])
 				{
+					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y -= PLAYER_SPEED_DIAG;
+					else this.pos.y -= PLAYER_SPEED;
+				}
+				if (keysDown[this.downKey])
+				{
+					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y += PLAYER_SPEED_DIAG;
+					else this.pos.y += PLAYER_SPEED;
+				}
+				if (keysDown[this.leftKey])
+				{
+					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x -= PLAYER_SPEED_DIAG;
+					else this.pos.x -= PLAYER_SPEED;
+				}
+				if (keysDown[this.rightKey])
+				{
+					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x += PLAYER_SPEED_DIAG;
+					else this.pos.x += PLAYER_SPEED;
+				}
 
+				// Shooting
+				if (mouseDown && this.readyToFire)
+				{
+					this.loaded--;
+					this.curGunDelay = items[this.gunID].rate;
+
+					var angle = Math.atan((mousePos.y + cam.y - this.pos.y) / (mousePos.x + cam.x - this.pos.x));
+					if (mousePos.x + cam.x - this.pos.x < 0)
+						angle += Math.PI;
+
+					for (var i = 0; i < items[this.gunID].count; i++)
+						bullets.push(new Bullet(
+							this.pos.x,
+							this.pos.y,
+							angle + Math.random()*items[this.gunID].accr - items[this.gunID].accr/2,
+							items[this.gunID].dmg,
+							items[this.gunID].range));
 				}
 			}
 		}
 
 		// Adds to zbuffer
-		var objectAdded = false;
-		for (var i = 0; i < zbuffer.length; i++)
-		{
-			if (this.y >= zbuffer[i].y)
-			{
-				zbuffer.splice(i, 0, this);
-				objectAdded = true;
-				break;
-			}
-		}
-		if (!objectAdded)
-			zbuffer.push(this);
+		AddToZBuffer(this);
 	}
 
 	// Draws to frame
@@ -92,11 +149,11 @@ function Player (_x, _y, _gunID, _helmetID, _armourID)
 		if (this.alive)
 		{
 			ctx.beginPath();
-			ctx.rect(this.x-PLAYER_SIZE/2, this.y-PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE);
+			ctx.rect(this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y - PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE);
 			ctx.fillStyle = "pink";
 			ctx.fill();
 			ctx.beginPath();
-			ctx.rect(this.x-PLAYER_SIZE/2, this.y, PLAYER_SIZE, PLAYER_SIZE);
+			ctx.rect(this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y, PLAYER_SIZE, PLAYER_SIZE);
 			ctx.fillStyle = "blue";
 			ctx.fill();
 		}
@@ -110,11 +167,31 @@ function Player (_x, _y, _gunID, _helmetID, _armourID)
 	}
 }
 
+// --- Camera Class ---
+function Camera ()
+{
+	this.x = 0;
+	this.y = 0;
+	this.target;
+
+	// Follow target
+	this.Update = function ()
+	{
+		if (this.target.x - this.x - canvas.width/2 > WALK_SPACE)
+			this.x = this.target.x - WALK_SPACE - canvas.width/2;
+		if (this.target.x - this.x - canvas.width/2 < -WALK_SPACE)
+			this.x = this.target.x + WALK_SPACE - canvas.width/2;
+		if (this.target.y - this.y - canvas.height/2 > WALK_SPACE)
+			this.y = this.target.y - WALK_SPACE - canvas.height/2;
+		if (this.target.y - this.y - canvas.height/2 < -WALK_SPACE)
+			this.y = this.target.y + WALK_SPACE - canvas.height/2;
+	}
+}
+
 // --- Zombie Class ---
 function Zombie (_x, _y)
 {
-	this.x = _x;
-	this.y = _y;
+	this.pos = { x: _x, y: _y };
 
 	this.health = ZOMBIE_HEALTH;
 	this.speed = Math.random() * (ZOMBIE_SPEEDMAX - ZOMBIE_SPEEDMIN) + ZOMBIE_SPEEDMIN;
@@ -126,53 +203,41 @@ function Zombie (_x, _y)
 			this.Death();
 
 		// Follow player
-		var xDist = player.x - this.x;
-		var yDist = player.y - this.y;
+		var xDist = player.pos.x - this.pos.x;
+		var yDist = player.pos.y - this.pos.y;
 		if (xDist > 0)
 		{
 			var dir = Math.atan(yDist / xDist);
-			this.x += Math.cos(dir) * this.speed;
-			this.y += Math.sin(dir) * this.speed;
+			this.pos.x += Math.cos(dir) * this.speed;
+			this.pos.y += Math.sin(dir) * this.speed;
 		}
 		else if (xDist < 0)
 		{
 			var dir = Math.atan(yDist / xDist);
-			this.x -= Math.cos(dir) * this.speed;
-			this.y -= Math.sin(dir) * this.speed;
+			this.pos.x -= Math.cos(dir) * this.speed;
+			this.pos.y -= Math.sin(dir) * this.speed;
 		}
 		else
 		{
 			if (yDist > 0)
-				this.y += this.speed;
+				this.pos.y += this.speed;
 			else
-				this.y -= this.speed;
+				this.pos.y -= this.speed;
 		}
 
 		// Adds to zbuffer
-		var objectAdded = false;
-		var zbufferLength = zbuffer.length;
-		for (var i = 0; i < zbufferLength; i++)
-		{
-			if (this.y <= zbuffer[i].y)
-			{
-				zbuffer.splice(i, 0, this);
-				objectAdded = true;
-				break;
-			}
-		}
-		if (!objectAdded)
-			zbuffer.push(this);
+		AddToZBuffer(this);
 	}
 
 	// Draws to frame
 	this.Draw = function ()
 	{
 		ctx.beginPath();
-		ctx.rect(this.x-ZOMBIE_SIZE/2, this.y-ZOMBIE_SIZE, ZOMBIE_SIZE, ZOMBIE_SIZE);
+		ctx.rect(this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y - ZOMBIE_SIZE, ZOMBIE_SIZE, ZOMBIE_SIZE);
 		ctx.fillStyle = "darkgreen";
 		ctx.fill();
 		ctx.beginPath();
-		ctx.rect(this.x-ZOMBIE_SIZE/2, this.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
+		ctx.rect(this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
 		ctx.fillStyle = "brown";
 		ctx.fill();
 	}
@@ -185,26 +250,34 @@ function Zombie (_x, _y)
 }
 
 // --- Bullet Class ---
-function Bullet (_x, _y, _dir)
+function Bullet (_x, _y, _dir, _damage, _range)
 {
-	this.x = _x;
-	this.y = _y;
-	this.dir = _dir; // 0 - 2*Math.PI
+	this.pos = { x: _x, y: _y };
+	this.dir = _dir;
+	this.damage = _damage;
+	this.lifetime = Math.random()*(_range.max-_range.min) + _range.min;
 
 	this.Update = function ()
 	{
 		// Move
+		this.pos.x += Math.cos(this.dir) * BULLET_SPEED;
+		this.pos.y += Math.sin(this.dir) * BULLET_SPEED;
 
-
-		// Destroy itself if outside boundaries
-		if (this.y < 0 || this.y > canvas.height)
+		// Destroy itself if out of range
+		if (this.lifetime-- <= 0)
 			this.Destroy();
+
+		// Adds to zbuffer
+		AddToZBuffer(this);
 	}
 
 	// Draw to frame
 	this.Draw = function ()
 	{
-		ctx.rect(this.x - BULLET_SIZE/2, this.y - BULLET_SIZE/2, BULLET_SIZE, BULLET_SIZE);
+		ctx.beginPath();
+		ctx.rect(this.pos.x - cam.x - BULLET_SIZE/2, this.pos.y - cam.y - BULLET_SIZE/2, BULLET_SIZE, BULLET_SIZE);
+		ctx.fillStyle = "white";
+		ctx.fill();
 	}
 
 	// Removes itself from list
@@ -218,10 +291,8 @@ function Bullet (_x, _y, _dir)
 // --- Particle Class ---
 function Particle (_x, _y, _xVel, _yVel, _size, _lifetime, _colour)
 {
-	this.x = _x;
-	this.y = _y;
-	this.xVel = _xVel;
-	this.yVel = _yVel;
+	this.pos = { x: _x, y: _y };
+	this.vel = { x: _xVel, y: _yVel };
 	this.size = _size;
 	this.lifetime = _lifetime;
 	this.colour = _colour;
@@ -229,14 +300,14 @@ function Particle (_x, _y, _xVel, _yVel, _size, _lifetime, _colour)
 	this.Update = function ()
 	{
 		// Move
-		this.x += this._xVel;
-		this.y += this._yVel;
+		this.pos.x += this.vel.x;
+		this.pos.y += this.vel.y;
 	}
 
 	// Draw to frame
 	this.Draw = function ()
 	{
-		
+		 //- cam.
 	}
 
 	// Removes itself from list
@@ -254,11 +325,17 @@ function Particle (_x, _y, _xVel, _yVel, _size, _lifetime, _colour)
 function Start ()
 {
 	// Spawns players
-	player = new Player(300, 500, 0, 0, 0);
+	player = new Player(300, 300, 4);
 
 	// debug zombies
 	for (var i = 0; i < 20; i++)
-		zombies.push(new Zombie(Math.random() * canvas.width, Math.random() * canvas.height));
+		zombies.push(new Zombie(
+			Math.random() * canvas.width,
+			Math.random() * canvas.height));
+
+	// Setup camera
+	cam = new Camera();
+	cam.target = player.pos;
 }
 
 // --- Main Loop ---
@@ -267,10 +344,11 @@ function Update ()
 	zbuffer = [];
 
 	player.Update();
-	//for (var i = 0; i < bullets.length; i++) bullets[i].Update();
+	for (var i = 0; i < bullets.length; i++) bullets[i].Update();
 	for (var i = 0; i < zombies.length; i++) zombies[i].Update();
-	//for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Update();
-	//for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
+	for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Update();
+	for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
+	cam.Update();
 
 	// Draws frame
 	Draw();
@@ -285,16 +363,38 @@ function Draw ()
 
 	for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Draw();
 	for (var i = 0; i < zbuffer.length; i++) zbuffer[i].Draw();
-	for (var i = 0; i < bullets.length; i++) bullets[i].Draw();
 	for (var i = 0; i < highParticles.length; i++) highParticles[i].Draw();
+}
+
+function AddToZBuffer(object)
+{
+	var objectAdded = false;
+	var zbufferLength = zbuffer.length;
+	for (var i = 0; i < zbufferLength; i++)
+	{
+		if (object.pos.y <= zbuffer[i].pos.y)
+		{
+			zbuffer.splice(i, 0, object);
+			objectAdded = true;
+			break;
+		}
+	}
+	if (!objectAdded)
+		zbuffer.push(object);
+}
+
+// --- Vector2 ---
+function vec2 (_x, _y)
+{
+	return { x: _x, y: _y };
 }
 
 // --- Keyboard Input (Down) ---
 document.addEventListener('keydown', function (e)
 {
 	// Stops scrolling with arrows and space bar
-    if([32, 37, 38, 39, 40].indexOf(e.keyCode) > -1)
-        e.preventDefault();
+	if([32, 37, 38, 39, 40].indexOf(e.keyCode) > -1)
+		e.preventDefault();
 
 	keysDown[e.keyCode] = true;
 });
@@ -304,6 +404,27 @@ document.addEventListener('keyup', function (e)
 {
 	keysDown[e.keyCode] = false;
 });
+
+// --- Mouse Input (click down) ---
+document.addEventListener('mousedown', function (e)
+{
+	mouseDown = true;
+});
+
+// --- Mouse Input (click up) ---
+document.addEventListener('mouseup', function (e)
+{
+	mouseDown = false;
+});
+
+// --- Mouse Input (pos) ---
+canvas.addEventListener('mousemove', function(e) {
+	mousePos =
+	{
+		x: e.clientX - canvas.getBoundingClientRect().left,
+		y: e.clientY - canvas.getBoundingClientRect().top
+	};
+}, false);
 
 // ==================== ON LOAD ====================
 
