@@ -461,7 +461,7 @@ function Zombie (_x, _y)
 	this.Death = function ()
 	{
 		this.alive = false;
-		this.Bleed(10);
+		Bleed(this.pos.x, this.pos.y, this.impactDir, this.impactForce, ~~(5 * _BLOOD_INTENSITY));
 	}
 
 	// Removes itself from list
@@ -690,10 +690,10 @@ function Update ()
 		// Update objects
 		zbuffer = [];
 		player.Update();
-		var b = bullets.length;       for (var i = 0; i < b; i++) bullets[i].Update();
-		var z = zombies.length;       for (var i = 0; i < z; i++) zombies[i].Update();
-		var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Update();
-		var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Update();
+		for (var i = 0; i < bullets.length; i++) bullets[i].Update();
+		for (var i = 0; i < zombies.length; i++) zombies[i].Update();
+		for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Update();
+		for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
 		cam.Update();
 	}
 
