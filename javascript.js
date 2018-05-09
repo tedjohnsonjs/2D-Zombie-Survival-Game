@@ -46,9 +46,21 @@ var pauseKey = 27;
 var keysDown = [];
 var mousePos = { x: 0, y: 0 };
 var mouseDown = false;
-var mouseReleased = true;
+var mouseReleased = false;
 
-var pauseMenuButtons = [];
+var pauseButtons = [];
+var optionButtons = [];
+var menuButtons = [];
+
+var options = false;
+var mainMenu = true;
+
+var drawGame;
+var drawUI;
+var drawDead;
+var drawPause;
+var drawMenu;
+var drawOptions;
 
 // Object lists
 var player;
@@ -103,6 +115,7 @@ function Player (_x, _y, _gunID)
 	this.loaded = items[this.gunID].mag;
 	this.curGunDelay = 0;
 	this.curReloadDelay = items[this.gunID].reload;
+	this.semiFireReady = true;
 
 	this.impactDir = 0;
 	this.impactForce = 0;
@@ -123,6 +136,10 @@ function Player (_x, _y, _gunID)
 			this.speedMultiplier = items[this.gunID].speed;
 		else
 			this.speedMultiplier = 1;
+
+		// On release of mouse
+		if (!mouseDown)
+			this.semiFireReady = true;
 
 		// Removes hurt invunrablility
 		if (this.invunrable-- < 0)
@@ -222,9 +239,9 @@ function Player (_x, _y, _gunID)
 				// ------------------
 
 				// Shooting
-				if (mouseDown && this.readyToFire && (mouseReleased || items[this.gunID].auto || _AUTO_FIRING))
+				if (mouseDown && this.readyToFire && (this.semiFireReady || items[this.gunID].auto || _AUTO_FIRING))
 				{
-					mouseReleased = false;
+					this.semiFireReady = false;
 					this.loaded--;
 					this.curGunDelay = items[this.gunID].rate;
 
@@ -577,7 +594,7 @@ function Particle (_x, _y, _dir, _speed, _drag, _size, _lifetime, _colour, _isLo
 }
 
 // --- Button Class ---
-function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colour, _borderColour, _borderWidth)
+function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colour, _borderColour, _borderWidth, _functionName)
 {
 	this.text = _text;
 	this.textStyle = _textStyle;
@@ -587,22 +604,20 @@ function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colo
 	this.colour = _colour;
 	this.borderColour = _borderColour;
 	this.borderWidth = _borderWidth;
+	this.functionName = _functionName;
 	this.highlighted = false;
 
 	this.Update = function ()
 	{
+		// Checks if mouse is over button
 		this.highlighted = false;
 		if (mousePos.x > this.pos.x && mousePos.x < this.pos.x + this.size.x)
-		{
 			if (mousePos.y > this.pos.y && mousePos.y < this.pos.y + this.size.y)
-			{
 				this.highlighted = true;
-				if (mouseDown)
-				{
-					paused = false;
-				}
-			}
-		}
+
+		// Checks if mouse has released on top of button
+		if (mouseReleased && this.highlighted)
+				window[this.functionName]();
 	}
 
 	this.Draw = function ()
@@ -637,22 +652,61 @@ function Start ()
 	// Setup
 	ctx.textAlign = "center";
 
-	// Spawns players
-	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
-
-	// Setup camera
-	cam = new Camera();
-	cam.target = player.pos;
-
-	// Setup pause menu
-	pauseMenuButtons.push(new UIButton("Restart", "18px Impact", "red", 75,  canvas.height - 100, 100, 50, "black", "darkred", 3));
-	pauseMenuButtons.push(new UIButton("Menu", "18px Impact", "red", 200, canvas.height - 100, 100, 50, "black", "darkred", 3));
-	pauseMenuButtons.push(new UIButton("Options",    "18px Impact", "red", 325, canvas.height - 100, 100, 50, "black", "darkred", 3));
+	// Setup buttons
+	pauseButtons.push(new UIButton("Restart", "18px Impact", "red",     75,  canvas.height - 100, 100, 50, "black", "darkred", 3, "StartGame"));
+	pauseButtons.push(new UIButton("Menu",    "18px Impact", "red",     200, canvas.height - 100, 100, 50, "black", "darkred", 3, "OpenMainMenu"));
+	pauseButtons.push(new UIButton("Options", "18px Impact", "red",     325, canvas.height - 100, 100, 50, "black", "darkred", 3, "OpenOptions"));
+	optionButtons.push(new UIButton("Back",   "18px Impact", "darkred", 125, canvas.height - 80,  100, 40, "red",   "darkred", 3, "CloseOptions"));
+	menuButtons.push(new UIButton("Play",     "18px Impact", "darkred", 200, canvas.height - 80,  100, 40, "red",   "darkred", 3, "StartGame"));
 }
 
 // --- Main Loop ---
 function Update ()
 {
+	// Reset all draw callers
+	drawUI = drawDead = drawPause = drawMenu = drawOptions = false;
+	drawGame = true;
+
+	// If the main menu is open
+	if (mainMenu)
+	{
+		drawMenu = true;
+		for (var i = 0; i < menuButtons.length; i++)
+			menuButtons[i].Update();
+	}
+
+	// If the main menu isnt open
+	else
+		UpdateGame();
+
+	if (options)
+	{
+		drawOptions = true;
+		for (var i = 0; i < optionButtons.length; i++)
+			optionButtons[i].Update();
+	}
+
+	// Mouse no longer in released state
+	mouseReleased = false;
+
+	// Draws everything
+	Draw();
+}
+
+// --- Updates game related objects ---
+function UpdateGame ()
+{
+	// If the player is alive
+	if (player.alive)
+		drawUI = true;
+
+	// If the player is dead
+	else
+	{
+		pauseButtons[1].Update();
+		drawDead = true;
+	}
+
 	// Pause if loses focus
 	if (!document.hasFocus())
 		paused = true;
@@ -664,25 +718,37 @@ function Update ()
 		paused = !paused;
 	}
 
-	if (!paused)
+	// If the game is paused
+	if (paused)
 	{
-		// Spawn zombies
+		drawPause = true;
+		for (var i = 0; i < pauseButtons.length; i++)
+			pauseButtons[i].Update();
+	}
+	// If the game is not paused
+	else
+	{
+		// Spawn zombies -- debug
 		if (Math.random() < 0.01)
 		{
 			var x = cam.x;
 			var y = cam.y;
-			var rand = ~~(Math.random()*4);
-			if (rand == 0) x += Math.random()*canvas.width;
-			if (rand == 1) y += Math.random()*canvas.height;
-			if (rand == 2)
+			switch (~~(Math.random()*4))
 			{
-				x += Math.random()*canvas.width;
-				y += canvas.height;
-			}
-			if (rand == 3)
-			{
-				x += canvas.width;
-				y += Math.random()*canvas.height;
+				case 0:
+					x += Math.random()*canvas.width;
+					break;
+				case 1:
+					y += Math.random()*canvas.height;
+					break;
+				case 2:
+					x += Math.random()*canvas.width;
+					y += canvas.height;
+					break;
+				case 3:
+					x += canvas.width;
+					y += Math.random()*canvas.height;
+					break;
 			}
 			zombies.push(new Zombie(x, y));
 		}
@@ -690,53 +756,34 @@ function Update ()
 		// Update objects
 		zbuffer = [];
 		player.Update();
-		for (var i = 0; i < bullets.length; i++) bullets[i].Update();
-		for (var i = 0; i < zombies.length; i++) zombies[i].Update();
-		for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Update();
+		for (var i = 0; i < bullets.length; i++)       bullets[i].Update();
+		for (var i = 0; i < zombies.length; i++)       zombies[i].Update();
+		for (var i = 0; i < lowParticles.length; i++)  lowParticles[i].Update();
 		for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
 		cam.Update();
 	}
-
-	// Draws frame and UI
-	Draw();
-	DrawUI();
-
-	// Draw death screen
-	if (!player.alive)
-	{
-		pauseMenuButtons[1].Update();
-		DrawDead();
-	}
-
-	// Draws pause menu
-	if (paused)
-	{
-		// Update buttons
-		for (var i = 0; i < pauseMenuButtons.length; i++)
-			pauseMenuButtons[i].Update();
-
-		// Empty keys and draw
-		keysDown = [];
-		DrawPause();
-	}
 }
 
-// --- Draws Frame to Canvas ---
+// --- Draws everything appropriate ---
 function Draw ()
 {
 	// Clear Background
 	ctx.beginPath();
 	ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-	ctx.beginPath();
-	ctx.rect(0, 0, canvas.width, canvas.height);
-	ctx.fillStyle = "rgb(25, 25, 25)";
-	ctx.fill();
+	// Draw different components
+	if (drawGame)    DrawGame();
+	if (drawUI)      DrawUI();
+	if (drawDead)    DrawDead();
+	if (drawPause)   DrawPause();
+	if (drawMenu)    DrawMenu();
+	if (drawOptions) DrawOptions();
 
-	// Objects
-	var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Draw();
-	var z = zbuffer.length;       for (var i = 0; i < z; i++) zbuffer[i].Draw();
-	var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Draw();
+	// Borders
+	DrawRect("grey", 0, 0, canvas.width, 5);
+	DrawRect("grey", 0, canvas.height, canvas.width, -5);
+	DrawRect("grey", 0, 0, 5, canvas.height);
+	DrawRect("grey", canvas.width, 0, -5, canvas.height);
 }
 
 function DrawRect (colour, x, y, xSize, ySize)
@@ -753,6 +800,18 @@ function DrawText (text, style, colour, x, y)
 	ctx.font = style;
 	ctx.fillStyle = colour;
 	ctx.fillText(text, x, y);
+}
+
+// --- Draw game to Canvas ---
+function DrawGame ()
+{
+	// Level
+	DrawRect("rgb(25, 25, 25)", 0, 0, canvas.width, canvas.height);
+
+	// Objects
+	var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Draw();
+	var z = zbuffer.length;       for (var i = 0; i < z; i++) zbuffer[i].Draw();
+	var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Draw();
 }
 
 // --- Draw UI to Canvas ---
@@ -788,12 +847,17 @@ function DrawUI ()
 			ctx.textAlign = "center";
 		}
 	}
+}
 
-	// Borders
-	DrawRect("grey", 0, 0, canvas.width, 5);
-	DrawRect("grey", 0, canvas.height, canvas.width, -5);
-	DrawRect("grey", 0, 0, 5, canvas.height);
-	DrawRect("grey", canvas.width, 0, -5, canvas.height);
+// --- Draw death screen ---
+function DrawDead ()
+{
+	// Text
+	DrawText("Looks Like You're", "20px Impact", "darkred", canvas.width / 2, canvas.height / 2 - 40);
+	DrawText("DEAD", "80px Impact", "red", canvas.width / 2, canvas.height / 2 + 30);
+
+	// Home button
+	pauseButtons[1].Draw();
 }
 
 // --- Draw pause menu ---
@@ -812,27 +876,39 @@ function DrawPause ()
 	DrawText("Hit ESC To Continue", "18px Impact", "darkred", canvas.width / 2, canvas.height / 2 + 25);
 
 	// Buttons
-	for (var i = 0; i < pauseMenuButtons.length; i++)
-		pauseMenuButtons[i].Draw();
+	for (var i = 0; i < pauseButtons.length; i++)
+		pauseButtons[i].Draw();
+}
+
+// --- Draw main menu ---
+function DrawMenu ()
+{
+	// Background
+	DrawRect("black", 0, 0, canvas.width, canvas.height);
+
+	// Text
+	DrawText("[Name]", "60px Impact", "red", canvas.width/2, 150);
+
+	// Buttons
+	for (var i = 0; i < menuButtons.length; i++)
+		menuButtons[i].Draw();
 }
 
 // --- Draw options menu ---
 function DrawOptions ()
 {
-	// Back
+	// Background
+	DrawRect("black", 0, 0, canvas.width, canvas.height);
 	DrawRect("grey", 100, 100, canvas.width-200, canvas.height-200);
 	DrawRect("black", 105, 105, canvas.width-210, canvas.height-210);
-}
 
-// --- Draw death screen ---
-function DrawDead ()
-{
 	// Text
-	DrawText("Looks Like You're", "20px Impact", "darkred", canvas.width / 2, canvas.height / 2 - 40);
-	DrawText("DEAD", "80px Impact", "red", canvas.width / 2, canvas.height / 2 + 30);
+	DrawText("Options", "30px Impact", "white", canvas.width/2, 150);
+	DrawText("v1.3.2", "11px Ariel", "white", canvas.width/2 + 120, canvas.height/2 + 185);
 
-	// Home button
-	pauseMenuButtons[1].Draw();
+	// Buttons
+	for (var i = 0; i < optionButtons.length; i++)
+		optionButtons[i].Draw();
 }
 
 // --- Sort objects into ZBuffer --- 
@@ -882,6 +958,42 @@ function GunParticles (x, y, dir)
 			Math.random() * (MUZZLE_LIFETIMEMAX - MUZZLE_LIFETIMEMIN) + MUZZLE_LIFETIMEMIN,
 			"white",
 			false));
+}
+
+// =============== Button Functions ===============
+
+function StartGame()
+{
+	// Reset variables
+	mainMenu = false;
+	paused = false;
+	keysDown = [];
+
+	// Resets all objects
+	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
+	bullets = [];
+	zombies = [];
+	lowParticles = [];
+	highParticles = [];
+
+	// Setup camera
+	cam = new Camera();
+	cam.target = player.pos;
+}
+
+function OpenMainMenu()
+{
+	mainMenu = true;
+}
+
+function OpenOptions()
+{
+	options = true;
+}
+
+function CloseOptions()
+{
+	options = false;
 }
 
 // ==================== EVENTS ====================
