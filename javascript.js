@@ -2,7 +2,8 @@
 // ==================== VARIABLES ====================
 
 // Game Settings
-var _AUTO_RELOADING = true;
+var _AUTO_RELOADING = false;
+var _AUTO_FIRING = false;
 var _BLOOD_INTENSITY = 1;
 var _ZOMBIE_HANDS = true;
 
@@ -12,6 +13,7 @@ const PLAYER_SPEED = 1;
 const PLAYER_SPEED_DIAG = PLAYER_SPEED * 0.707;
 const PLAYER_SIZE = 10;
 const PLAYER_HAND_SIZE = 4;
+const PLAYER_GUN_SIZE = 4;
 const PLAYER_DRAG = 0.925;
 const PLAYER_INVUNRABLE_TIME = 5;
 const PLAYER_STARTING_GUN = 0;
@@ -39,9 +41,14 @@ const BLOOD_LIFETIMEMIN = 750;
 // Variables
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
+var paused = false;
+var pauseKey = 27;
 var keysDown = [];
 var mousePos = { x: 0, y: 0 };
 var mouseDown = false;
+var mouseReleased = true;
+
+var pauseMenuButtons = [];
 
 // Object lists
 var player;
@@ -57,13 +64,13 @@ var items =
 /*0*/ { name: "Empty" },
 
 //    --- Guns ---
-/*1*/ { name: "Pistol",              dmg: 3, range: { min: 70, max: 80 },   rate: 50, count: 1,  accr: 0.05,  force: 0.5,  mag: 8,   reload: 100 },
-/*2*/ { name: "Rifle",               dmg: 8, range: { min: 160, max: 200 }, rate: 90, count: 1,  accr: 0.01,  force: 1,    mag: 5,   reload: 200 },
-/*3*/ { name: "Pump-Action Shotgun", dmg: 1, range: { min: 30, max: 70 },   rate: 80, count: 8,  accr: 0.175, force: 0.75, mag: 6,   reload: 300 },
-/*4*/ { name: "Double-Barrel",       dmg: 2, range: { min: 10, max: 50 },   rate: 20, count: 12, accr: 0.5,   force: 1.5,  mag: 2,   reload: 200 },
-/*5*/ { name: "Sub-Machine Gun",     dmg: 1, range: { min: 60, max: 80 },   rate: 8,  count: 1,  accr: 0.175, force: 0.3,  mag: 30,  reload: 150 },
-/*6*/ { name: "Machine Gun",         dmg: 3, range: { min: 80, max: 125 },  rate: 12, count: 1,  accr: 0.05,  force: 0.8,  mag: 24,  reload: 200 },
-/*7*/ { name: "Mini Gun",            dmg: 1, range: { min: 80, max: 100 },  rate: 5,  count: 1,  accr: 0.2,   force: 1,    mag: 200, reload: 1000 }
+/*1*/ { name: "Pistol",              dmg: 3, range: { min: 70, max: 80 },   rate: 30, count: 1,  accr: 0.05,  speed: 1,   force: 0.5,  recoil: 0,    mag: 8,  reload: 100,  auto: false },
+/*2*/ { name: "Rifle",               dmg: 8, range: { min: 160, max: 200 }, rate: 80, count: 1,  accr: 0.01,  speed: 0.8, force: 0.75, recoil: 0.5,  mag: 5,  reload: 200,  auto: false },
+/*3*/ { name: "Pump-Action Shotgun", dmg: 1, range: { min: 30, max: 70 },   rate: 75, count: 8,  accr: 0.175, speed: 0.8, force: 0.75, recoil: 0.75, mag: 6,  reload: 300,  auto: false },
+/*4*/ { name: "Double-Barrel",       dmg: 2, range: { min: 10, max: 50 },   rate: 20, count: 12, accr: 0.5,   speed: 0.7, force: 2,    recoil: 1,    mag: 2,  reload: 200,  auto: false },
+/*5*/ { name: "Sub-Machine Gun",     dmg: 2, range: { min: 40, max: 70 },   rate: 8,  count: 1,  accr: 0.2,   speed: 1,   force: 0.3,  recoil: 0.1,  mag: 30, reload: 150,  auto: true  },
+/*6*/ { name: "Machine Gun",         dmg: 3, range: { min: 80, max: 125 },  rate: 12, count: 1,  accr: 0.1,   speed: 0.8, force: 0.8,  recoil: 0.25, mag: 24, reload: 200,  auto: true  },
+/*7*/ { name: "Mini Gun",            dmg: 2, range: { min: 80, max: 125 },  rate: 5,  count: 1,  accr: 0.25,  speed: 0.5, force: 1,    recoil: 0.5, mag: 200, reload: 1000, auto: true  }
 ];
 
 // ==================== CLASSES ====================
@@ -72,6 +79,7 @@ var items =
 function Player (_x, _y, _gunID)
 {
 	this.pos = { x: _x, y: _y };
+	this.handPos = { x: 0, y: 0 };
 	this.vel = { x: 0, y: 0 };
 	this.dir = 0;
 
@@ -85,6 +93,7 @@ function Player (_x, _y, _gunID)
 	this.health = PLAYER_HEALTH;
 	this.alive = true;
 	this.hasControl = true;
+	this.speedMultiplier;
 	this.moving;
 
 	this.gunID = _gunID;
@@ -108,6 +117,12 @@ function Player (_x, _y, _gunID)
 		// Drag on velocity
 		this.vel.x *= PLAYER_DRAG;
 		this.vel.y *= PLAYER_DRAG;
+
+		// Resets speed multipler
+		if (items[this.gunID].speed != undefined)
+			this.speedMultiplier = items[this.gunID].speed;
+		else
+			this.speedMultiplier = 1;
 
 		// Removes hurt invunrablility
 		if (this.invunrable-- < 0)
@@ -155,26 +170,26 @@ function Player (_x, _y, _gunID)
 				this.moving = false;
 				if (keysDown[this.upKey])
 				{
-					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y -= PLAYER_SPEED_DIAG;
-					else this.pos.y -= PLAYER_SPEED;
+					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y -= PLAYER_SPEED_DIAG * this.speedMultiplier;
+					else this.pos.y -= PLAYER_SPEED * this.speedMultiplier;
 					this.moving = true;
 				}
 				if (keysDown[this.downKey])
 				{
-					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y += PLAYER_SPEED_DIAG;
-					else this.pos.y += PLAYER_SPEED;
+					if (keysDown[this.rightKey] || keysDown[this.leftKey]) this.pos.y += PLAYER_SPEED_DIAG * this.speedMultiplier;
+					else this.pos.y += PLAYER_SPEED * this.speedMultiplier;
 					this.moving = true;
 				}
 				if (keysDown[this.leftKey])
 				{
-					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x -= PLAYER_SPEED_DIAG;
-					else this.pos.x -= PLAYER_SPEED;
+					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x -= PLAYER_SPEED_DIAG * this.speedMultiplier;
+					else this.pos.x -= PLAYER_SPEED * this.speedMultiplier;
 					this.moving = true;
 				}
 				if (keysDown[this.rightKey])
 				{
-					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x += PLAYER_SPEED_DIAG;
-					else this.pos.x += PLAYER_SPEED;
+					if (keysDown[this.upKey] || keysDown[this.downKey]) this.pos.x += PLAYER_SPEED_DIAG * this.speedMultiplier;
+					else this.pos.x += PLAYER_SPEED * this.speedMultiplier;
 					this.moving = true;
 				}
 
@@ -207,15 +222,19 @@ function Player (_x, _y, _gunID)
 				// ------------------
 
 				// Shooting
-				if (mouseDown && this.readyToFire)
+				if (mouseDown && this.readyToFire && (mouseReleased || items[this.gunID].auto || _AUTO_FIRING))
 				{
+					mouseReleased = false;
 					this.loaded--;
 					this.curGunDelay = items[this.gunID].rate;
 
+					// Walking inaccuracy
 					if (this.moving)
 						this.dir += Math.random()*WALK_INACCURACY - WALK_INACCURACY/2;
 
-					for (var i = 0; i < items[this.gunID].count; i++)
+					// Spawns bullets
+					var b = items[this.gunID].count;
+					for (var i = 0; i < b; i++)
 						bullets.push(new Bullet(
 							this.pos.x,
 							this.pos.y,
@@ -224,9 +243,18 @@ function Player (_x, _y, _gunID)
 							items[this.gunID].force,
 							items[this.gunID].range));
 
+					// Muzzle particles
 					GunParticles(this.pos.x, this.pos.y, this.dir);
+
+					// Applies recoil velocity
+					this.vel.x = Math.cos(this.dir + Math.PI) * items[this.gunID].recoil;
+					this.vel.y = Math.sin(this.dir + Math.PI) * items[this.gunID].recoil;
 				}
 			}
+
+			// Sets handPos
+			this.handPos.x = this.pos.x - cam.x - PLAYER_HAND_SIZE/2 + Math.cos(this.dir)*6;
+			this.handPos.y = this.pos.y - cam.y + 2;
 		}
 
 		// Adds to zbuffer
@@ -239,20 +267,14 @@ function Player (_x, _y, _gunID)
 		if (this.alive)
 		{
 			// Head
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y - PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE);
-			ctx.fillStyle = "pink";
-			ctx.fill();
+			DrawRect("pink", this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y - PLAYER_SIZE, PLAYER_SIZE, PLAYER_SIZE);
 
 			// Hands behind back
 			if (this.dir <= 0 || this.dir >= Math.PI)
 				this.DrawHands();
 
 			// Body
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y, PLAYER_SIZE, PLAYER_SIZE);
-			ctx.fillStyle = "blue";
-			ctx.fill();
+			DrawRect("blue", this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y, PLAYER_SIZE, PLAYER_SIZE);
 
 			// Hands infront
 			if (this.dir > 0 && this.dir < Math.PI)
@@ -261,20 +283,21 @@ function Player (_x, _y, _gunID)
 		else
 		{
 			// Dead head
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y, PLAYER_SIZE, PLAYER_SIZE);
-			ctx.fillStyle = "pink";
-			ctx.fill();
+			DrawRect("pink", this.pos.x - cam.x - PLAYER_SIZE/2, this.pos.y - cam.y, PLAYER_SIZE, PLAYER_SIZE);
 		}
 	}
 
 	// Draw hands
 	this.DrawHands = function()
 	{
-		ctx.beginPath();
-		ctx.rect(this.pos.x - cam.x - PLAYER_HAND_SIZE/2 + Math.cos(this.dir)*6, this.pos.y - cam.y + 1, PLAYER_HAND_SIZE, PLAYER_HAND_SIZE);
-		ctx.fillStyle = "pink";
-		ctx.fill();
+		// Gun
+		//ctx.beginPath();
+		//ctx.rect(this.pos.x - cam.x - PLAYER_HAND_SIZE/2 + Math.cos(this.dir)*6, this.pos.y - cam.y - 1, PLAYER_GUN_SIZE + Math.abs(Math.cos(this.dir))*6, PLAYER_HAND_SIZE);
+		//ctx.fillStyle = "grey";
+		//ctx.fill();
+
+		// Hand
+		DrawRect("pink", this.handPos.x, this.handPos.y, PLAYER_HAND_SIZE, PLAYER_HAND_SIZE);
 	}
 
 	// Pickup item
@@ -397,20 +420,14 @@ function Zombie (_x, _y)
 		if (this.alive)
 		{
 			// Head
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y - ZOMBIE_SIZE, ZOMBIE_SIZE, ZOMBIE_SIZE);
-			ctx.fillStyle = "darkgreen";
-			ctx.fill();
+			DrawRect("darkgreen", this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y - ZOMBIE_SIZE, ZOMBIE_SIZE, ZOMBIE_SIZE);
 
 			// Hands behind back
 			if ((this.dir <= 0 || this.dir >= Math.PI) && _ZOMBIE_HANDS)
 				this.DrawHands();
 
 			// Body
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
-			ctx.fillStyle = "brown";
-			ctx.fill();
+			DrawRect("brown", this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
 
 			// Hands infront
 			if (this.dir > 0 && this.dir < Math.PI && _ZOMBIE_HANDS)
@@ -419,24 +436,14 @@ function Zombie (_x, _y)
 		else
 		{
 			// Dead head
-			ctx.beginPath();
-			ctx.rect(this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
-			ctx.fillStyle = "darkgreen";
-			ctx.fill();
+			DrawRect("darkgreen", this.pos.x - cam.x - ZOMBIE_SIZE/2, this.pos.y - cam.y, ZOMBIE_SIZE, ZOMBIE_SIZE);
 		}
 	}
 
 	this.DrawHands = function ()
 	{
-		ctx.beginPath();
-		ctx.rect(this.pos.x - cam.x - ZOMBIE_HAND_SIZE/2 + Math.cos(this.dir-0.6)*6, this.pos.y - cam.y + 1, ZOMBIE_HAND_SIZE, ZOMBIE_HAND_SIZE);
-		ctx.fillStyle = "darkgreen";
-		ctx.fill();
-
-		ctx.beginPath();
-		ctx.rect(this.pos.x - cam.x - ZOMBIE_HAND_SIZE/2 + Math.cos(this.dir+0.6)*6, this.pos.y - cam.y + 1, ZOMBIE_HAND_SIZE, ZOMBIE_HAND_SIZE);
-		ctx.fillStyle = "darkgreen";
-		ctx.fill();
+		DrawRect("darkgreen", this.pos.x - cam.x - ZOMBIE_HAND_SIZE/2 + Math.cos(this.dir-0.6)*6, this.pos.y - cam.y + 1, ZOMBIE_HAND_SIZE, ZOMBIE_HAND_SIZE);
+		DrawRect("darkgreen", this.pos.x - cam.x - ZOMBIE_HAND_SIZE/2 + Math.cos(this.dir+0.6)*6, this.pos.y - cam.y + 1, ZOMBIE_HAND_SIZE, ZOMBIE_HAND_SIZE);
 	}
 
 	// Hurts zombie
@@ -481,7 +488,8 @@ function Bullet (_x, _y, _dir, _damage, _force, _range)
 		this.pos.y += Math.sin(this.dir) * BULLET_SPEED;
 
 		// Collision
-		for (var i = 0; i < zombies.length; i++)
+		var z = zombies.length;
+		for (var i = 0; i < z; i++)
 		{
 			if (zombies[i].alive)
 			{
@@ -505,10 +513,7 @@ function Bullet (_x, _y, _dir, _damage, _force, _range)
 	// Draw to frame
 	this.Draw = function ()
 	{
-		ctx.beginPath();
-		ctx.rect(this.pos.x - cam.x - BULLET_SIZE/2, this.pos.y - cam.y - BULLET_SIZE/2, BULLET_SIZE, BULLET_SIZE);
-		ctx.fillStyle = "white";
-		ctx.fill();
+		DrawRect("white", this.pos.x - cam.x - BULLET_SIZE/2, this.pos.y - cam.y - BULLET_SIZE/2, BULLET_SIZE, BULLET_SIZE);
 	}
 
 	// Removes itself from list
@@ -551,10 +556,7 @@ function Particle (_x, _y, _dir, _speed, _drag, _size, _lifetime, _colour, _isLo
 	// Draw to frame
 	this.Draw = function ()
 	{
-		ctx.beginPath();
-		ctx.rect(this.pos.x - cam.x - this.size/2, this.pos.y - cam.y - this.size/2, this.size, this.size);
-		ctx.fillStyle = this.colour;
-		ctx.fill();
+		DrawRect(this.colour, this.pos.x - cam.x - this.size/2, this.pos.y - cam.y - this.size/2, this.size, this.size);
 	}
 
 	// Removes itself from list
@@ -574,151 +576,271 @@ function Particle (_x, _y, _dir, _speed, _drag, _size, _lifetime, _colour, _isLo
 	}
 }
 
+// --- Button Class ---
+function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colour, _borderColour, _borderWidth)
+{
+	this.text = _text;
+	this.textStyle = _textStyle;
+	this.textColour = _textColour;
+	this.pos = { x: _x, y: _y };
+	this.size = { x: _xSize, y: _ySize };
+	this.colour = _colour;
+	this.borderColour = _borderColour;
+	this.borderWidth = _borderWidth;
+	this.highlighted = false;
+
+	this.Update = function ()
+	{
+		this.highlighted = false;
+		if (mousePos.x > this.pos.x && mousePos.x < this.pos.x + this.size.x)
+		{
+			if (mousePos.y > this.pos.y && mousePos.y < this.pos.y + this.size.y)
+			{
+				this.highlighted = true;
+				if (mouseDown)
+				{
+					paused = false;
+				}
+			}
+		}
+	}
+
+	this.Draw = function ()
+	{
+		// Border
+		DrawRect(this.borderColour, this.pos.x, this.pos.y, this.size.x, this.size.y);
+
+		// Main
+		DrawRect(this.colour, this.pos.x + this.borderWidth, this.pos.y + this.borderWidth, this.size.x - this.borderWidth*2, this.size.y - this.borderWidth*2);
+
+		// Text
+		ctx.beginPath();
+		ctx.fillStyle = this.textColour;
+		ctx.font = this.textStyle;
+		ctx.fillText(this.text, this.pos.x + this.size.x/2, this.pos.y + this.size.y/1.6);
+
+		// Highlight
+		if (this.highlighted)
+		{
+			ctx.globalAlpha = 0.075;
+			DrawRect("white", this.pos.x, this.pos.y, this.size.x, this.size.y);
+			ctx.globalAlpha = 1;
+		}
+	}
+}
 
 // ==================== FUNCTIONS ====================
 
 // --- Starts Game ---
 function Start ()
 {
-	// Spawns players
-	player = new Player(600, 300, PLAYER_STARTING_GUN);
+	// Setup
+	ctx.textAlign = "center";
 
-	// debug zombies
-	for (var i = 0; i < 0; i++)
-		zombies.push(new Zombie(
-			Math.random() * canvas.width,
-			Math.random() * canvas.height));
+	// Spawns players
+	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
 
 	// Setup camera
 	cam = new Camera();
 	cam.target = player.pos;
+
+	// Setup pause menu
+	pauseMenuButtons.push(new UIButton("Restart", "18px Impact", "red", 75,  canvas.height - 100, 100, 50, "black", "darkred", 3));
+	pauseMenuButtons.push(new UIButton("Menu", "18px Impact", "red", 200, canvas.height - 100, 100, 50, "black", "darkred", 3));
+	pauseMenuButtons.push(new UIButton("Options",    "18px Impact", "red", 325, canvas.height - 100, 100, 50, "black", "darkred", 3));
 }
 
 // --- Main Loop ---
 function Update ()
 {
-	// Spawn zombies
-	if (Math.random() < 0.01)
+	// Pause if loses focus
+	if (!document.hasFocus())
+		paused = true;
+
+	// Toggle pause with pause key
+	if (keysDown[pauseKey])
 	{
-		var x = cam.x;
-		var y = cam.y;
-		var rand = Math.floor(Math.random()*4);
-		if (rand == 0) x += Math.random()*canvas.width;
-		if (rand == 1) y += Math.random()*canvas.height;
-		if (rand == 2)
-		{
-			x += Math.random()*canvas.width;
-			y += canvas.height;
-		}
-		if (rand == 3)
-		{
-			x += canvas.width;
-			y += Math.random()*canvas.height;
-		}
-		zombies.push(new Zombie(x, y));
+		keysDown = [];
+		paused = !paused;
 	}
 
-	// Update objects
-	zbuffer = [];
-	player.Update();
-	for (var i = 0; i < bullets.length; i++) bullets[i].Update();
-	for (var i = 0; i < zombies.length; i++) zombies[i].Update();
-	for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Update();
-	for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
-	cam.Update();
+	if (!paused)
+	{
+		// Spawn zombies
+		if (Math.random() < 0.01)
+		{
+			var x = cam.x;
+			var y = cam.y;
+			var rand = ~~(Math.random()*4);
+			if (rand == 0) x += Math.random()*canvas.width;
+			if (rand == 1) y += Math.random()*canvas.height;
+			if (rand == 2)
+			{
+				x += Math.random()*canvas.width;
+				y += canvas.height;
+			}
+			if (rand == 3)
+			{
+				x += canvas.width;
+				y += Math.random()*canvas.height;
+			}
+			zombies.push(new Zombie(x, y));
+		}
 
-	// Draws frame
+		// Update objects
+		zbuffer = [];
+		player.Update();
+		var b = bullets.length;       for (var i = 0; i < b; i++) bullets[i].Update();
+		var z = zombies.length;       for (var i = 0; i < z; i++) zombies[i].Update();
+		var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Update();
+		var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Update();
+		cam.Update();
+	}
+
+	// Draws frame and UI
 	Draw();
+	DrawUI();
+
+	// Draw death screen
+	if (!player.alive)
+	{
+		pauseMenuButtons[1].Update();
+		DrawDead();
+	}
+
+	// Draws pause menu
+	if (paused)
+	{
+		// Update buttons
+		for (var i = 0; i < pauseMenuButtons.length; i++)
+			pauseMenuButtons[i].Update();
+
+		// Empty keys and draw
+		keysDown = [];
+		DrawPause();
+	}
 }
 
 // --- Draws Frame to Canvas ---
 function Draw ()
 {
-	// Background
+	// Clear Background
 	ctx.beginPath();
 	ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-	// Objects
-	for (var i = 0; i < lowParticles.length; i++) lowParticles[i].Draw();
-	for (var i = 0; i < zbuffer.length; i++) zbuffer[i].Draw();
-	for (var i = 0; i < highParticles.length; i++) highParticles[i].Draw();
+	ctx.beginPath();
+	ctx.rect(0, 0, canvas.width, canvas.height);
+	ctx.fillStyle = "rgb(25, 25, 25)";
+	ctx.fill();
 
-	// UI
-	DrawUI();
+	// Objects
+	var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Draw();
+	var z = zbuffer.length;       for (var i = 0; i < z; i++) zbuffer[i].Draw();
+	var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Draw();
+}
+
+function DrawRect (colour, x, y, xSize, ySize)
+{
+	ctx.beginPath();
+	ctx.rect(x, y, xSize, ySize);
+	ctx.fillStyle = colour;
+	ctx.fill();
+}
+
+function DrawText (text, style, colour, x, y)
+{
+	ctx.beginPath();
+	ctx.font = style;
+	ctx.fillStyle = colour;
+	ctx.fillText(text, x, y);
 }
 
 // --- Draw UI to Canvas ---
 function DrawUI ()
 {
 	// Health
-	ctx.beginPath();
-	ctx.rect(10, canvas.height - 10, 30, -PLAYER_HEALTH - 10);
-	ctx.fillStyle = "grey";
-	ctx.fill();
-
-	ctx.beginPath();
-	ctx.rect(15, canvas.height - 15, 20, -PLAYER_HEALTH);
-	ctx.fillStyle = "black";
-	ctx.fill();
-
-	ctx.beginPath();
-	ctx.rect(15, canvas.height - 15, 20, -player.health);
-	ctx.fillStyle = "red";
-	ctx.fill();
+	DrawRect("grey", 10, canvas.height - 10, 30, -PLAYER_HEALTH - 10);
+	DrawRect("black", 15, canvas.height - 15, 20, -PLAYER_HEALTH);
+	DrawRect("red", 15, canvas.height - 15, 20, -player.health);
 
 	// Gun name
-	ctx.beginPath();
-	ctx.fillStyle = "white";
-	ctx.font = "17px Impact";
-	ctx.fillText(items[player.gunID].name, canvas.width - 10 - items[player.gunID].name.length*8.5, canvas.height - 12);
+	ctx.textAlign = "right";
+	DrawText(items[player.gunID].name, "17px Impact", "white", canvas.width - 10, canvas.height - 12);
+	ctx.textAlign = "center";
 	
 	// Ammo
 	if (player.loaded > 0)
 	{
 		for (var i = 0; i < player.loaded; i++)
 		{
-			ctx.beginPath();
-			ctx.rect(canvas.width - 15 - i*8 + Math.floor(i/40) * 320, canvas.height - 50 - Math.floor(i/40) * 20, 5, 15);
-			if (player.reload) ctx.fillStyle = "grey";
-			else ctx.fillStyle = "white";
-			ctx.fill();
+			if (player.reload)
+				DrawRect("grey", canvas.width - 15 - i*8 + ~~(i/40) * 320, canvas.height - 50 - ~~(i/40) * 20, 5, 15);
+			else
+				DrawRect("white", canvas.width - 15 - i*8 + ~~(i/40) * 320, canvas.height - 50 - ~~(i/40) * 20, 5, 15);
 		}
 	}
 	else
 	{
 		if (!player.reload && items[player.gunID].mag != undefined)
 		{
-			ctx.beginPath();
-			ctx.fillStyle = "red";
-			ctx.font = "17px Impact";
-			ctx.fillText("RELOAD", canvas.width - 62, canvas.height - 38);
+			ctx.textAlign = "right";
+			DrawText("RELOAD", "17px Impact", "red", canvas.width - 10, canvas.height - 38);
+			ctx.textAlign = "center";
 		}
 	}
 
 	// Borders
-	ctx.beginPath();
-	ctx.rect(0, 0, canvas.width, 5)
-	ctx.fillStyle = 'grey';
-	ctx.fill();
-	ctx.beginPath();
-	ctx.rect(0, canvas.height, canvas.width, -5)
-	ctx.fillStyle = 'grey';
-	ctx.fill();
-	ctx.beginPath();
-	ctx.rect(0, 0, 5, canvas.height)
-	ctx.fillStyle = 'grey';
-	ctx.fill();
-	ctx.beginPath();
-	ctx.rect(canvas.width, 0, -5, canvas.height)
-	ctx.fillStyle = 'grey';
-	ctx.fill();
+	DrawRect("grey", 0, 0, canvas.width, 5);
+	DrawRect("grey", 0, canvas.height, canvas.width, -5);
+	DrawRect("grey", 0, 0, 5, canvas.height);
+	DrawRect("grey", canvas.width, 0, -5, canvas.height);
 }
 
+// --- Draw pause menu ---
+function DrawPause ()
+{
+	// Background
+	ctx.globalAlpha = 0.6;
+	DrawRect("black", 0, 0, canvas.width, canvas.height);
+	ctx.globalAlpha = 1;
+
+	// Banner
+	DrawRect("black", 0, canvas.height / 2 - 55, canvas.width, 100);
+
+	// Text
+	DrawText("PAUSED", "50px Impact", "red", canvas.width / 2, canvas.height / 2);
+	DrawText("Hit ESC To Continue", "18px Impact", "darkred", canvas.width / 2, canvas.height / 2 + 25);
+
+	// Buttons
+	for (var i = 0; i < pauseMenuButtons.length; i++)
+		pauseMenuButtons[i].Draw();
+}
+
+// --- Draw options menu ---
+function DrawOptions ()
+{
+	// Back
+	DrawRect("grey", 100, 100, canvas.width-200, canvas.height-200);
+	DrawRect("black", 105, 105, canvas.width-210, canvas.height-210);
+}
+
+// --- Draw death screen ---
+function DrawDead ()
+{
+	// Text
+	DrawText("Looks Like You're", "20px Impact", "darkred", canvas.width / 2, canvas.height / 2 - 40);
+	DrawText("DEAD", "80px Impact", "red", canvas.width / 2, canvas.height / 2 + 30);
+
+	// Home button
+	pauseMenuButtons[1].Draw();
+}
+
+// --- Sort objects into ZBuffer --- 
 function AddToZBuffer(object)
 {
 	var objectAdded = false;
-	var zbufferLength = zbuffer.length;
-	for (var i = 0; i < zbufferLength; i++)
+	var z = zbuffer.length;
+	for (var i = 0; i < z; i++)
 	{
 		if (object.pos.y <= zbuffer[i].pos.y)
 		{
@@ -731,9 +853,11 @@ function AddToZBuffer(object)
 		zbuffer.push(object);
 }
 
+// --- Shoot blood particles outwards ---
 function Bleed (x, y, dir, force, count)
 {
-	for (var i = 0; i < count * _BLOOD_INTENSITY; i++)
+	var totalNum = count * _BLOOD_INTENSITY;
+	for (var i = 0; i < totalNum; i++)
 		lowParticles.push(new Particle(
 			x, y,
 			dir + Math.random() - 0.5,
@@ -745,6 +869,7 @@ function Bleed (x, y, dir, force, count)
 			true));
 }
 
+// --- Shoot gun particles outwards ---
 function GunParticles (x, y, dir)
 {
 	for (var i = 0; i < 5; i++)
@@ -758,6 +883,8 @@ function GunParticles (x, y, dir)
 			"white",
 			false));
 }
+
+// ==================== EVENTS ====================
 
 // --- Keyboard Input (Down) ---
 document.addEventListener('keydown', function (e)
@@ -785,6 +912,7 @@ document.addEventListener('mousedown', function (e)
 document.addEventListener('mouseup', function (e)
 {
 	mouseDown = false;
+	mouseReleased = true;
 });
 
 // --- Mouse Input (pos) ---
@@ -794,7 +922,7 @@ canvas.addEventListener('mousemove', function(e) {
 		x: e.clientX - canvas.getBoundingClientRect().left,
 		y: e.clientY - canvas.getBoundingClientRect().top
 	};
-}, false);
+});
 
 // ==================== ON LOAD ====================
 
