@@ -1,11 +1,14 @@
 
 // ==================== VARIABLES ====================
 
+const GAME_VERSION = "v1.3.4";
+
 // Game Settings
 var _AUTO_RELOADING = false;
 var _AUTO_FIRING = false;
 var _BLOOD_INTENSITY = 1;
 var _ZOMBIE_HANDS = true;
+var _ZOMBIE_COLLISIONS = true;
 
 // Constants
 const PLAYER_HEALTH = 100;
@@ -34,6 +37,7 @@ const ZOMBIE_SIZE = 10;
 const ZOMBIE_HAND_SIZE = 4;
 const ZOMBIE_DRAG = 0.925;
 const ZOMBIE_DECOMPOSE = 900;
+const ZOMBIE_PUSH = 0.05;
 
 const BLOOD_LIFETIMEMAX = 1000;
 const BLOOD_LIFETIMEMIN = 750;
@@ -82,7 +86,7 @@ var items =
 /*4*/ { name: "Double-Barrel",       dmg: 2, range: { min: 10, max: 50 },   rate: 20, count: 12, accr: 0.5,   speed: 0.7, force: 2,    recoil: 1,    mag: 2,  reload: 200,  auto: false },
 /*5*/ { name: "Sub-Machine Gun",     dmg: 2, range: { min: 40, max: 70 },   rate: 8,  count: 1,  accr: 0.2,   speed: 1,   force: 0.3,  recoil: 0.1,  mag: 30, reload: 150,  auto: true  },
 /*6*/ { name: "Machine Gun",         dmg: 3, range: { min: 80, max: 125 },  rate: 12, count: 1,  accr: 0.1,   speed: 0.8, force: 0.8,  recoil: 0.25, mag: 24, reload: 200,  auto: true  },
-/*7*/ { name: "Mini Gun",            dmg: 2, range: { min: 80, max: 125 },  rate: 5,  count: 1,  accr: 0.25,  speed: 0.5, force: 1,    recoil: 0.5, mag: 200, reload: 1000, auto: true  }
+/*7*/ { name: "Mini Gun",            dmg: 2, range: { min: 80, max: 125 },  rate: 5,  count: 1,  accr: 0.15,  speed: 0.5, force: 1,    recoil: 0.5, mag: 200, reload: 1000, auto: true  }
 ];
 
 // ==================== CLASSES ====================
@@ -249,6 +253,10 @@ function Player (_x, _y, _gunID)
 					if (this.moving)
 						this.dir += Math.random()*WALK_INACCURACY - WALK_INACCURACY/2;
 
+					// Velocity inaccuracy
+					var mag = (Math.abs(this.vel.x) + Math.abs(this.vel.y)) * 2;
+					this.dir += Math.random() * mag - mag / 2;
+
 					// Spawns bullets
 					var b = items[this.gunID].count;
 					for (var i = 0; i < b; i++)
@@ -408,6 +416,30 @@ function Zombie (_x, _y)
 			// Checks health
 			if (this.health <= 0)
 				this.Death();
+
+			// Collides with other zombies
+			if (_ZOMBIE_COLLISIONS)
+			{
+				var z = zombies.length;
+				for (var i = 0; i < z; i++)
+				{
+					if (zombies[i] != this && zombies[i].alive)
+					{
+						var xDist = this.pos.x - zombies[i].pos.x;
+						var yDist = this.pos.y - zombies[i].pos.y;
+
+						if (Math.abs(xDist) < ZOMBIE_SIZE && Math.abs(yDist) < ZOMBIE_SIZE)
+						{
+							var pushDir = Math.atan(yDist / xDist);
+							if (xDist < 0)
+								pushDir += Math.PI;
+
+							this.vel.x += Math.cos(pushDir) * ZOMBIE_PUSH;
+							this.vel.y += Math.sin(pushDir) * ZOMBIE_PUSH;
+						}
+					}
+				}
+			}
 
 			// Follow player
 			this.dir = Math.atan((player.pos.y - this.pos.y) / (player.pos.x - this.pos.x));
@@ -617,7 +649,10 @@ function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colo
 
 		// Checks if mouse has released on top of button
 		if (mouseReleased && this.highlighted)
-				window[this.functionName]();
+		{
+			window[this.functionName]();
+			mouseReleased = false;
+		}
 	}
 
 	this.Draw = function ()
@@ -646,7 +681,7 @@ function UIButton (_text, _textStyle, _textColour, _x, _y, _xSize, _ySize, _colo
 
 // ==================== FUNCTIONS ====================
 
-// --- Starts Game ---
+// --- Starts Everything ---
 function Start ()
 {
 	// Setup
@@ -660,12 +695,43 @@ function Start ()
 	menuButtons.push(new UIButton("Play",     "18px Impact", "darkred", 200, canvas.height - 80,  100, 40, "red",   "darkred", 3, "StartGame"));
 }
 
+/// --- Starts Game ---
+function StartGame()
+{
+	// Reset variables
+	mainMenu = false;
+	paused = false;
+	keysDown = [];
+
+	// Resets all objects
+	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
+	bullets = [];
+	zombies = [];
+	lowParticles = [];
+	highParticles = [];
+
+	// Setup camera
+	cam = new Camera();
+	cam.target = player.pos;
+
+	// Debug initial zombies ---
+	for (var i = 0; i < 0; i++)
+		zombies.push(new Zombie(200 + i * 50, 200));
+}
+
 // --- Main Loop ---
 function Update ()
 {
 	// Reset all draw callers
 	drawUI = drawDead = drawPause = drawMenu = drawOptions = false;
 	drawGame = true;
+
+	if (options)
+	{
+		drawOptions = true;
+		for (var i = 0; i < optionButtons.length; i++)
+			optionButtons[i].Update();
+	}
 
 	// If the main menu is open
 	if (mainMenu)
@@ -678,13 +744,6 @@ function Update ()
 	// If the main menu isnt open
 	else
 		UpdateGame();
-
-	if (options)
-	{
-		drawOptions = true;
-		for (var i = 0; i < optionButtons.length; i++)
-			optionButtons[i].Update();
-	}
 
 	// Mouse no longer in released state
 	mouseReleased = false;
@@ -760,7 +819,7 @@ function UpdateGame ()
 		for (var i = 0; i < zombies.length; i++)       zombies[i].Update();
 		for (var i = 0; i < lowParticles.length; i++)  lowParticles[i].Update();
 		for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
-		cam.Update();
+		if (player.alive) cam.Update();
 	}
 }
 
@@ -888,6 +947,7 @@ function DrawMenu ()
 
 	// Text
 	DrawText("[Name]", "60px Impact", "red", canvas.width/2, 150);
+	DrawText(GAME_VERSION, "11px Ariel", "white", canvas.width - 28, canvas.height - 12);
 
 	// Buttons
 	for (var i = 0; i < menuButtons.length; i++)
@@ -904,7 +964,7 @@ function DrawOptions ()
 
 	// Text
 	DrawText("Options", "30px Impact", "white", canvas.width/2, 150);
-	DrawText("v1.3.2", "11px Ariel", "white", canvas.width/2 + 120, canvas.height/2 + 185);
+	DrawText(GAME_VERSION, "11px Ariel", "white", canvas.width/2 + 120, canvas.height/2 + 185);
 
 	// Buttons
 	for (var i = 0; i < optionButtons.length; i++)
@@ -961,25 +1021,6 @@ function GunParticles (x, y, dir)
 }
 
 // =============== Button Functions ===============
-
-function StartGame()
-{
-	// Reset variables
-	mainMenu = false;
-	paused = false;
-	keysDown = [];
-
-	// Resets all objects
-	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
-	bullets = [];
-	zombies = [];
-	lowParticles = [];
-	highParticles = [];
-
-	// Setup camera
-	cam = new Camera();
-	cam.target = player.pos;
-}
 
 function OpenMainMenu()
 {
