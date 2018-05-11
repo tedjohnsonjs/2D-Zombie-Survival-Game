@@ -1,9 +1,10 @@
 
 // ==================== VARIABLES ====================
 
-const GAME_VERSION = "v1.3.4";
+const GAME_VERSION = "v1.3.5";
 
 // Game Settings
+var _DRAW_FPS = true;
 var _AUTO_RELOADING = false;
 var _AUTO_FIRING = false;
 var _BLOOD_INTENSITY = 1;
@@ -20,6 +21,7 @@ const PLAYER_GUN_SIZE = 4;
 const PLAYER_DRAG = 0.925;
 const PLAYER_INVUNRABLE_TIME = 5;
 const PLAYER_STARTING_GUN = 0;
+const PLAYER_RECOIL_INACCURACY = 1;
 const WALK_SPACE = 50;
 const WALK_INACCURACY = 0.75;
 
@@ -39,12 +41,17 @@ const ZOMBIE_DRAG = 0.925;
 const ZOMBIE_DECOMPOSE = 900;
 const ZOMBIE_PUSH = 0.05;
 
+const GROUNDITEM_SIZE = 10;
+const GROUNDITEM_RANGE = 20;
+
 const BLOOD_LIFETIMEMAX = 1000;
 const BLOOD_LIFETIMEMIN = 750;
 
 // Variables
 var canvas = document.getElementById('canvas');
 var ctx = canvas.getContext('2d');
+var fps = "FPS";
+var times = [];
 var paused = false;
 var pauseKey = 27;
 var keysDown = [];
@@ -59,6 +66,8 @@ var menuButtons = [];
 var options = false;
 var mainMenu = true;
 
+var uiText;
+
 var drawGame;
 var drawUI;
 var drawDead;
@@ -70,6 +79,7 @@ var drawOptions;
 var player;
 var bullets = [];
 var zombies = [];
+var groundItems = [];
 var lowParticles = [];
 var highParticles = [];
 var zbuffer = [];
@@ -77,7 +87,7 @@ var zbuffer = [];
 // Items
 var items =
 [
-/*0*/ { name: "Empty" },
+/*0*/ { name: "Nothing" },
 
 //    --- Guns ---
 /*1*/ { name: "Pistol",              dmg: 3, range: { min: 70, max: 80 },   rate: 30, count: 1,  accr: 0.05,  speed: 1,   force: 0.5,  recoil: 0,    mag: 8,  reload: 100,  auto: false },
@@ -254,7 +264,7 @@ function Player (_x, _y, _gunID)
 						this.dir += Math.random()*WALK_INACCURACY - WALK_INACCURACY/2;
 
 					// Velocity inaccuracy
-					var mag = (Math.abs(this.vel.x) + Math.abs(this.vel.y)) * 2;
+					var mag = (Math.abs(this.vel.x) + Math.abs(this.vel.y)) * PLAYER_RECOIL_INACCURACY;
 					this.dir += Math.random() * mag - mag / 2;
 
 					// Spawns bullets
@@ -289,6 +299,7 @@ function Player (_x, _y, _gunID)
 	// Draws to frame
 	this.Draw = function ()
 	{
+
 		if (this.alive)
 		{
 			// Head
@@ -573,6 +584,44 @@ function Bullet (_x, _y, _dir, _damage, _force, _range)
 	}
 }
 
+// --- Object on Ground Class ---
+function GroundItem (_x, _y, _id)
+{
+	this.pos = { x: _x, y: _y };
+	this.itemID = _id;
+
+	this.Update = function ()
+	{
+		if (Math.abs(this.pos.x - player.pos.x) < GROUNDITEM_RANGE &&
+			Math.abs(this.pos.y - player.pos.y) < GROUNDITEM_RANGE)
+		{
+			// Write text to ui
+			uiText = "Pickup " + items[this.itemID].name;
+
+			if (keysDown[player.useKey])
+				this.Pickup();
+		}
+	}
+
+	this.Draw = function ()
+	{
+		DrawRect("black", this.pos.x - cam.x - GROUNDITEM_SIZE/2, this.pos.y - cam.y - GROUNDITEM_SIZE/2, GROUNDITEM_SIZE, GROUNDITEM_SIZE);
+	}
+
+	this.Pickup = function ()
+	{
+		player.Pickup(this.itemID);
+		this.Destroy();
+	}
+
+	// Removes itself from list
+	this.Destroy = function ()
+	{
+		this.index = groundItems.indexOf(this);
+		groundItems.splice(this.index, 1);
+	}
+}
+
 // --- Particle Class ---
 function Particle (_x, _y, _dir, _speed, _drag, _size, _lifetime, _colour, _isLow)
 {
@@ -688,7 +737,7 @@ function Start ()
 	ctx.textAlign = "center";
 
 	// Setup buttons
-	pauseButtons.push(new UIButton("Restart", "18px Impact", "red",     75,  canvas.height - 100, 100, 50, "black", "darkred", 3, "StartGame"));
+	pauseButtons.push(new UIButton("Continue", "18px Impact", "red",     75,  canvas.height - 100, 100, 50, "black", "darkred", 3, "ContinueGame"));
 	pauseButtons.push(new UIButton("Menu",    "18px Impact", "red",     200, canvas.height - 100, 100, 50, "black", "darkred", 3, "OpenMainMenu"));
 	pauseButtons.push(new UIButton("Options", "18px Impact", "red",     325, canvas.height - 100, 100, 50, "black", "darkred", 3, "OpenOptions"));
 	optionButtons.push(new UIButton("Back",   "18px Impact", "darkred", 125, canvas.height - 80,  100, 40, "red",   "darkred", 3, "CloseOptions"));
@@ -707,6 +756,7 @@ function StartGame()
 	player = new Player(canvas.width/2, canvas.height/2, PLAYER_STARTING_GUN);
 	bullets = [];
 	zombies = [];
+	groundItems = [];
 	lowParticles = [];
 	highParticles = [];
 
@@ -714,9 +764,12 @@ function StartGame()
 	cam = new Camera();
 	cam.target = player.pos;
 
-	// Debug initial zombies ---
+	// Debug initial objects ---
 	for (var i = 0; i < 0; i++)
 		zombies.push(new Zombie(200 + i * 50, 200));
+
+	for (var i = 0; i < 10; i++)
+		groundItems.push(new GroundItem(Math.random() * canvas.width, Math.random() * canvas.height, ~~(Math.random() * items.length)));
 }
 
 // --- Main Loop ---
@@ -787,6 +840,9 @@ function UpdateGame ()
 	// If the game is not paused
 	else
 	{
+		// Reset UI text
+		uiText = "";
+
 		// Spawn zombies -- debug
 		if (Math.random() < 0.01)
 		{
@@ -817,10 +873,23 @@ function UpdateGame ()
 		player.Update();
 		for (var i = 0; i < bullets.length; i++)       bullets[i].Update();
 		for (var i = 0; i < zombies.length; i++)       zombies[i].Update();
+		for (var i = 0; i < groundItems.length; i++)   groundItems[i].Update();
 		for (var i = 0; i < lowParticles.length; i++)  lowParticles[i].Update();
 		for (var i = 0; i < highParticles.length; i++) highParticles[i].Update();
 		if (player.alive) cam.Update();
 	}
+}
+
+function UpdateFPS ()
+{
+	window.requestAnimationFrame(function() {
+		const now = performance.now();
+		while (times.length > 0 && times[0] <= now - 1000)
+			times.shift();
+		times.push(now);
+		fps = times.length;
+		UpdateFPS();
+	});
 }
 
 // --- Draws everything appropriate ---
@@ -837,6 +906,7 @@ function Draw ()
 	if (drawPause)   DrawPause();
 	if (drawMenu)    DrawMenu();
 	if (drawOptions) DrawOptions();
+	if (_DRAW_FPS)   DrawFPS();
 
 	// Borders
 	DrawRect("grey", 0, 0, canvas.width, 5);
@@ -868,9 +938,11 @@ function DrawGame ()
 	DrawRect("rgb(25, 25, 25)", 0, 0, canvas.width, canvas.height);
 
 	// Objects
-	var l = lowParticles.length;  for (var i = 0; i < l; i++) lowParticles[i].Draw();
-	var z = zbuffer.length;       for (var i = 0; i < z; i++) zbuffer[i].Draw();
-	var h = highParticles.length; for (var i = 0; i < h; i++) highParticles[i].Draw();
+	var j;
+	j = groundItems.length;   for (var i = 0; i < j; i++) groundItems[i].Draw();
+	j = lowParticles.length;  for (var i = 0; i < j; i++) lowParticles[i].Draw();
+	j = zbuffer.length;       for (var i = 0; i < j; i++) zbuffer[i].Draw();
+	j = highParticles.length; for (var i = 0; i < j; i++) highParticles[i].Draw();
 }
 
 // --- Draw UI to Canvas ---
@@ -906,6 +978,9 @@ function DrawUI ()
 			ctx.textAlign = "center";
 		}
 	}
+
+	// UI Text info
+	DrawText(uiText, "15px Ariel", "white", canvas.width/2, canvas.height - 60);
 }
 
 // --- Draw death screen ---
@@ -971,6 +1046,14 @@ function DrawOptions ()
 		optionButtons[i].Draw();
 }
 
+// --- Draw fps text ---
+function DrawFPS ()
+{
+	ctx.textAlign = "left";
+	DrawText(fps, "11px Ariel", "white", 10, 20);
+	ctx.textAlign = "center";
+}
+
 // --- Sort objects into ZBuffer --- 
 function AddToZBuffer(object)
 {
@@ -1021,6 +1104,13 @@ function GunParticles (x, y, dir)
 }
 
 // =============== Button Functions ===============
+
+function ContinueGame()
+{
+	keysDown = [];
+	paused = false;
+}
+
 
 function OpenMainMenu()
 {
@@ -1081,4 +1171,5 @@ canvas.addEventListener('mousemove', function(e) {
 
 // Starts game
 Start();
+UpdateFPS();
 setInterval(Update, 10);
